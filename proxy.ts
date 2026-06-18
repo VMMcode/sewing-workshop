@@ -3,7 +3,7 @@ import { jwtVerify } from "jose";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
@@ -26,6 +26,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  runtime: "edge",
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|favicon.png).*)"],
 };
