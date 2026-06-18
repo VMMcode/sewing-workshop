@@ -1,3 +1,5 @@
+export const runtime = "experimental-edge";
+
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
