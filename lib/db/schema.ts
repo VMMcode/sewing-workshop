@@ -6,6 +6,7 @@ export const orders = pgTable("orders", {
   description: text("description"),
   fabricReceived: integer("fabric_received").notNull().default(0),
   fabricSewn: integer("fabric_sewn").notNull().default(0),
+  pricePerPiece: numeric("price_per_piece", { precision: 10, scale: 2 }),
   receivedAt: date("received_at"),
   deadline: date("deadline"),
   supplier: text("supplier"),
@@ -22,10 +23,21 @@ export const orderOperations = pgTable("order_operations", {
   pricePerUnit: numeric("price_per_unit", { precision: 10, scale: 2 }).notNull(),
 });
 
+export const employees = pgTable("employees", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  hiredAt: date("hired_at"),
+  terminatedAt: date("terminated_at"),
+  skills: text("skills").array(),
+  archived: integer("archived").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const dailyWork = pgTable("daily_work", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
   seamstressName: text("seamstress_name").notNull(),
+  employeeId: integer("employee_id").references(() => employees.id, { onDelete: "set null" }),
   operationId: integer("operation_id").notNull().references(() => orderOperations.id, { onDelete: "cascade" }),
   quantity: integer("quantity").notNull(),
   date: date("date").notNull(),
@@ -55,4 +67,12 @@ export const dailyWorkRelations = relations(dailyWork, ({ one }) => ({
     fields: [dailyWork.operationId],
     references: [orderOperations.id],
   }),
+  employee: one(employees, {
+    fields: [dailyWork.employeeId],
+    references: [employees.id],
+  }),
+}));
+
+export const employeesRelations = relations(employees, ({ many }) => ({
+  dailyWork: many(dailyWork),
 }));

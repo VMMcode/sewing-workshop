@@ -1,1 +1,40 @@
 @import "tailwindcss";
+
+/* Убираем стрелки-спиннеры у числовых полей — цифры вводятся вручную */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Кастомные скроллбары под визуал бренда «ЗеМуР» */
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d4cdc0 transparent;
+}
+
+/* WebKit (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #d4cdc0;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #a08060;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

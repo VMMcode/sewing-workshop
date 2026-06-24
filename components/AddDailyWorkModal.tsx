@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Select from "./Select";
 
 type Operation = { id: number; name: string; pricePerUnit: string };
 type OperationEntry = { operationId: number | ""; quantity: string };
+type Employee = { id: number; name: string; terminatedAt: string | null };
 
 type Props = {
   orderId: number;
@@ -13,12 +15,25 @@ type Props = {
 };
 
 export default function AddDailyWorkModal({ orderId, operations, onClose, onAdded }: Props) {
-  const [seamstressName, setSeamstressName] = useState("");
+  const [employeeId, setEmployeeId] = useState<number | "">("");
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [entries, setEntries] = useState<OperationEntry[]>([
     { operationId: operations[0]?.id ?? "", quantity: "" },
   ]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((data: Employee[]) => setEmployees(Array.isArray(data) ? data : []))
+      .catch(() => setEmployees([]));
+  }, []);
+
+  // Только действующие сотрудники (уволенных в выборе не показываем)
+  const activeEmployees = employees
+    .filter((e) => !e.terminatedAt)
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
 
   function addEntry() {
     setEntries([...entries, { operationId: operations[0]?.id ?? "", quantity: "" }]);
@@ -34,10 +49,12 @@ export default function AddDailyWorkModal({ orderId, operations, onClose, onAdde
     setEntries(updated);
   }
 
-  const isValid = seamstressName.trim() && entries.every((e) => e.operationId && e.quantity);
+  const isValid = employeeId !== "" && entries.every((e) => e.operationId && e.quantity);
 
   async function handleSubmit() {
     if (!isValid) return;
+    const employee = employees.find((emp) => emp.id === employeeId);
+    if (!employee) return;
     setLoading(true);
 
     await Promise.all(
@@ -47,7 +64,8 @@ export default function AddDailyWorkModal({ orderId, operations, onClose, onAdde
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             orderId,
-            seamstressName: seamstressName.trim(),
+            seamstressName: employee.name,
+            employeeId: employee.id,
             operationId: e.operationId,
             quantity: parseInt(e.quantity),
             date,
@@ -72,12 +90,18 @@ export default function AddDailyWorkModal({ orderId, operations, onClose, onAdde
         <div className="px-5 py-5 flex flex-col gap-6">
           <div>
             <label className="text-[#6b5a45] text-sm mb-1.5 block">Швея</label>
-            <input
-              value={seamstressName}
-              onChange={(e) => setSeamstressName(e.target.value)}
-              placeholder="Имя швеи"
-              className="w-full bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
-            />
+            {activeEmployees.length === 0 ? (
+              <p className="text-[#a0907a] text-base bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5">
+                Нет действующих сотрудников. Добавьте их во вкладке «Сотрудники».
+              </p>
+            ) : (
+              <Select
+                value={employeeId}
+                onChange={(v) => setEmployeeId(v as number)}
+                placeholder="Выберите швею"
+                options={activeEmployees.map((emp) => ({ value: emp.id, label: emp.name }))}
+              />
+            )}
           </div>
 
           <div>
@@ -104,17 +128,16 @@ export default function AddDailyWorkModal({ orderId, operations, onClose, onAdde
             <div className="flex flex-col gap-3">
               {entries.map((entry, i) => (
                 <div key={i} className="flex gap-3 items-center">
-                  <select
+                  <Select
+                    className="flex-1"
                     value={entry.operationId}
-                    onChange={(e) => updateEntry(i, "operationId", parseInt(e.target.value))}
-                    className="flex-1 bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base focus:outline-none focus:border-[#a08060]"
-                  >
-                    {operations.map((op) => (
-                      <option key={op.id} value={op.id}>
-                        {op.name} — {op.pricePerUnit} ₽/шт
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => updateEntry(i, "operationId", v as number)}
+                    placeholder="Операция"
+                    options={operations.map((op) => ({
+                      value: op.id,
+                      label: `${op.name} — ${op.pricePerUnit} ₽/шт`,
+                    }))}
+                  />
                   <input
                     type="number"
                     value={entry.quantity}

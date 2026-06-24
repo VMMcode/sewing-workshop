@@ -15,13 +15,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, description, fabricReceived, fabricSewn, receivedAt, deadline, supplier, notes, operations } = await req.json();
+  const { name, description, fabricReceived, fabricSewn, pricePerPiece, receivedAt, deadline, supplier, notes, operations } = await req.json();
 
   const [order] = await db.insert(orders).values({
     name,
     description: description ?? null,
     fabricReceived: fabricReceived ?? 0,
     fabricSewn: fabricSewn ?? 0,
+    pricePerPiece: pricePerPiece ?? null,
     receivedAt: receivedAt ?? null,
     deadline: deadline ?? null,
     supplier: supplier ?? null,

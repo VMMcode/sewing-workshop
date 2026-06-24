@@ -2,18 +2,37 @@
 
 import { useEffect, useState } from "react";
 
-type Operation = { id: number; name: string; pricePerUnit: string };
+type Operation = { id: number; name: string; pricePerUnit: string; workCount?: number };
 type Order = {
   id: number;
   name: string;
   description: string | null;
   fabricReceived: number;
+  pricePerPiece: string | null;
   receivedAt: string | null;
   deadline: string | null;
   supplier: string | null;
   notes: string | null;
   orderOperations: Operation[];
 };
+
+// Приводим ввод к числу: поддерживаем и точку, и запятую (1,2 = 1 руб 20 коп)
+function parsePrice(value: string | null) {
+  return parseFloat(String(value ?? "").replace(",", "."));
+}
+
+function totalPrice(quantity: number, pricePerPiece: string | null) {
+  const price = parsePrice(pricePerPiece);
+  if (!price || !quantity) return 0;
+  return quantity * price;
+}
+
+// Красивый вывод суммы: разделители тысяч, копейки через запятую
+function fmtMoney(value: string | number | null) {
+  const n = typeof value === "number" ? value : parsePrice(value);
+  if (!n) return "0";
+  return n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+}
 
 type Props = {
   onOrdersChanged: () => void;
@@ -23,6 +42,7 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
@@ -32,6 +52,17 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
     const data = await res.json();
     setOrders(data);
     setLoading(false);
+  }
+
+  async function refreshSelectedOrder(id: number) {
+    const res = await fetch(`/api/orders/${id}`);
+    const data = await res.json();
+    setSelectedOrder(data);
+  }
+
+  function openOrder(order: Order) {
+    setSelectedOrder(order);        // мгновенно показываем данные из списка
+    refreshSelectedOrder(order.id); // подгружаем детали (кол-во выработки по операциям)
   }
 
   async function deleteOrder(id: number) {
@@ -46,14 +77,37 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
     fetchOrders();
   }, []);
 
-  if (selectedOrder) {
+  if (selectedOrder && isEditing) {
     return (
       <OrderEditView
         order={selectedOrder}
-        onBack={() => setSelectedOrder(null)}
-        onSaved={() => { fetchOrders(); onOrdersChanged(); }}
-        onDeleteRequest={() => setConfirmDeleteId(selectedOrder.id)}
+        onBack={() => setIsEditing(false)}
+        onSaved={async () => {
+          await refreshSelectedOrder(selectedOrder.id);
+          fetchOrders();
+          onOrdersChanged();
+          setIsEditing(false);
+        }}
       />
+    );
+  }
+
+  if (selectedOrder) {
+    return (
+      <>
+        <OrderInfoView
+          order={selectedOrder}
+          onBack={() => setSelectedOrder(null)}
+          onEdit={() => setIsEditing(true)}
+          onDeleteRequest={() => setConfirmDeleteId(selectedOrder.id)}
+        />
+        {confirmDeleteId !== null && (
+          <ConfirmDeleteModal
+            onCancel={() => setConfirmDeleteId(null)}
+            onConfirm={() => deleteOrder(confirmDeleteId)}
+          />
+        )}
+      </>
     );
   }
 
@@ -78,7 +132,7 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
           {orders.map((order) => (
             <button
               key={order.id}
-              onClick={() => setSelectedOrder(order)}
+              onClick={() => openOrder(order)}
               className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-5 py-4 flex flex-col gap-2 text-left w-full hover:border-[#a08060] transition"
             >
               <p className="text-[#2e2318] text-base font-semibold">{order.name}</p>
@@ -92,9 +146,17 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
                   </span>
                 )}
                 {order.fabricReceived > 0 && (
-                  <span className="text-[#a0907a] text-sm">🧵 {order.fabricReceived} м</span>
+                  <span className="text-[#a0907a] text-sm">🧵 {order.fabricReceived} шт</span>
+                )}
+                {parsePrice(order.pricePerPiece) > 0 && (
+                  <span className="text-[#a0907a] text-sm">💵 {fmtMoney(order.pricePerPiece)} ₽/шт</span>
                 )}
               </div>
+              {totalPrice(order.fabricReceived, order.pricePerPiece) > 0 && (
+                <p className="text-[#7a5c2e] text-base font-semibold mt-1">
+                  {fmtMoney(totalPrice(order.fabricReceived, order.pricePerPiece))} ₽
+                </p>
+              )}
             </button>
           ))}
         </div>
@@ -108,27 +170,148 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
       )}
 
       {confirmDeleteId !== null && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-5">
-          <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl p-8 w-full max-w-sm">
-            <p className="text-[#2e2318] font-semibold mb-3">Удалить заказ?</p>
-            <p className="text-[#6b5a45] text-base mb-8">Заказ будет перемещён в архив. Все данные сохранятся.</p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => setConfirmDeleteId(null)}
-                className="flex-1 bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl py-3.5 text-base"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={() => deleteOrder(confirmDeleteId)}
-                className="flex-1 bg-[#c0392b]/10 hover:bg-[#c0392b]/20 border border-[#c0392b]/40 text-[#c0392b] rounded-xl py-3.5 text-base"
-              >
-                Удалить
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDeleteModal
+          onCancel={() => setConfirmDeleteId(null)}
+          onConfirm={() => deleteOrder(confirmDeleteId)}
+        />
       )}
+    </div>
+  );
+}
+
+// --- Иконки (outline) ---
+
+function PencilIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-5 h-5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-5 h-5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.165m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.16-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.04-2.09 1.02-2.09 2.2v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+    </svg>
+  );
+}
+
+// --- Модалка подтверждения удаления ---
+
+function ConfirmDeleteModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-5">
+      <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl p-8 w-full max-w-sm">
+        <p className="text-[#2e2318] font-semibold mb-3">Удалить заказ?</p>
+        <p className="text-[#6b5a45] text-base mb-8">Заказ будет перемещён в архив. Все данные сохранятся.</p>
+        <div className="flex gap-4">
+          <button
+            onClick={onCancel}
+            className="flex-1 bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl py-3.5 text-base"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 bg-[#c0392b]/10 hover:bg-[#c0392b]/20 border border-[#c0392b]/40 text-[#c0392b] rounded-xl py-3.5 text-base"
+          >
+            Удалить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Просмотр информации о заказе (только чтение) ---
+
+function fmtDate(d: string) {
+  return new Date(d + "T00:00:00").toLocaleDateString("ru-RU");
+}
+
+type InfoProps = {
+  order: Order;
+  onBack: () => void;
+  onEdit: () => void;
+  onDeleteRequest: () => void;
+};
+
+function OrderInfoView({ order, onBack, onEdit, onDeleteRequest }: InfoProps) {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={onBack} className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2">← Назад</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onEdit}
+            aria-label="Редактировать"
+            className="border border-[#d4cdc0] text-[#6b5a45] hover:border-[#a08060] hover:text-[#2e2318] rounded-xl p-2.5 transition"
+          >
+            <PencilIcon />
+          </button>
+          <button
+            onClick={onDeleteRequest}
+            aria-label="Удалить"
+            className="border border-[#c0392b]/40 text-[#c0392b] hover:bg-[#c0392b]/10 rounded-xl p-2.5 transition"
+          >
+            <TrashIcon />
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-5 py-5 flex flex-col gap-4">
+        <h2 className="text-[#2e2318] text-lg font-semibold">{order.name}</h2>
+        {order.description && <p className="text-[#6b5a45] text-base">{order.description}</p>}
+
+        <div className="grid grid-cols-2 gap-4">
+          <InfoField label="Поставщик" value={order.supplier} />
+          <InfoField label="Материал" value={order.fabricReceived > 0 ? `${order.fabricReceived} шт` : null} />
+          <InfoField label="Цена за штуку" value={parsePrice(order.pricePerPiece) > 0 ? `${fmtMoney(order.pricePerPiece)} ₽` : null} />
+          <InfoField
+            label="Цена за весь заказ"
+            value={
+              totalPrice(order.fabricReceived, order.pricePerPiece) > 0
+                ? `${fmtMoney(totalPrice(order.fabricReceived, order.pricePerPiece))} ₽`
+                : null
+            }
+          />
+          <InfoField label="Дата получения" value={order.receivedAt ? fmtDate(order.receivedAt) : null} />
+          <InfoField label="Срок реализации" value={order.deadline ? fmtDate(order.deadline) : null} />
+        </div>
+
+        {order.notes && (
+          <div>
+            <p className="text-[#a0907a] text-sm mb-0.5">Примечания</p>
+            <p className="text-[#2e2318] text-base whitespace-pre-line">{order.notes}</p>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="text-[#6b5a45] text-sm mb-3">Операции</p>
+        {order.orderOperations.length === 0 ? (
+          <p className="text-[#a0907a] text-base">Нет операций</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {order.orderOperations.map((op) => (
+              <div key={op.id} className="flex justify-between items-center bg-[#f5f2ec] border border-[#d4cdc0] rounded-xl px-4 py-3">
+                <p className="text-[#2e2318] text-base">{op.name}</p>
+                <p className="text-[#6b5a45] text-sm">{op.pricePerUnit} ₽/шт</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InfoField({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div>
+      <p className="text-[#a0907a] text-sm mb-0.5">{label}</p>
+      <p className="text-[#2e2318] text-base">{value ?? "—"}</p>
     </div>
   );
 }
@@ -139,21 +322,65 @@ type EditProps = {
   order: Order;
   onBack: () => void;
   onSaved: () => void;
-  onDeleteRequest: () => void;
 };
 
-function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
+type OpDraft = { id: number; name: string; pricePerUnit: string; workCount: number };
+
+function recordsWord(n: number) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "запись";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "записи";
+  return "записей";
+}
+
+function OrderEditView({ order, onBack, onSaved }: EditProps) {
   const [name, setName] = useState(order.name);
   const [description, setDescription] = useState(order.description ?? "");
   const [fabricReceived, setFabricReceived] = useState(String(order.fabricReceived));
+  const [pricePerPiece, setPricePerPiece] = useState(order.pricePerPiece ?? "");
   const [receivedAt, setReceivedAt] = useState(order.receivedAt ?? "");
   const [deadline, setDeadline] = useState(order.deadline ?? "");
   const [supplier, setSupplier] = useState(order.supplier ?? "");
   const [notes, setNotes] = useState(order.notes ?? "");
   const [loading, setLoading] = useState(false);
 
+  const orderTotal = totalPrice(parseInt(fabricReceived) || 0, pricePerPiece);
+
+  // Существующие операции (можно редактировать/удалять)
+  const [existingOps, setExistingOps] = useState<OpDraft[]>(
+    order.orderOperations.map((o) => ({
+      id: o.id,
+      name: o.name,
+      pricePerUnit: String(o.pricePerUnit),
+      workCount: o.workCount ?? 0,
+    }))
+  );
+  const [deletedOpIds, setDeletedOpIds] = useState<number[]>([]);
+  // Индекс операции, для которой запрошено удаление с предупреждением
+  const [pendingDeleteIdx, setPendingDeleteIdx] = useState<number | null>(null);
   // Новые операции
   const [newOps, setNewOps] = useState<{ name: string; pricePerUnit: string }[]>([]);
+
+  function updateExistingOp(i: number, field: "name" | "pricePerUnit", value: string) {
+    const updated = [...existingOps];
+    updated[i][field] = value;
+    setExistingOps(updated);
+  }
+
+  function requestRemoveExisting(i: number) {
+    if (existingOps[i].workCount > 0) {
+      setPendingDeleteIdx(i); // есть выработка — спросить подтверждение
+    } else {
+      removeExistingOp(i);
+    }
+  }
+
+  function removeExistingOp(i: number) {
+    setDeletedOpIds((prev) => [...prev, existingOps[i].id]);
+    setExistingOps(existingOps.filter((_, idx) => idx !== i));
+    setPendingDeleteIdx(null);
+  }
 
   function addNewOp() {
     setNewOps([...newOps, { name: "", pricePerUnit: "" }]);
@@ -169,11 +396,23 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
     setNewOps(newOps.filter((_, idx) => idx !== i));
   }
 
+  // Умная сверка: сумма стоимостей операций не должна превышать цену за штуку
+  const opsSum =
+    existingOps.reduce((s, o) => s + (parsePrice(o.pricePerUnit) || 0), 0) +
+    newOps.reduce((s, o) => s + (parsePrice(o.pricePerUnit) || 0), 0);
+  const pricePerPieceNum = parsePrice(pricePerPiece) || 0;
+  const opsOverBudget = pricePerPieceNum > 0 && opsSum > pricePerPieceNum;
+
   async function handleSave() {
-    if (!name.trim()) return;
+    if (!name.trim() || opsOverBudget) return;
     setLoading(true);
 
-    const validOps = newOps.filter((o) => o.name.trim() && o.pricePerUnit);
+    const validNew = newOps
+      .filter((o) => o.name.trim() && o.pricePerUnit)
+      .map((o) => ({ name: o.name, pricePerUnit: o.pricePerUnit.replace(",", ".") }));
+    const validUpdated = existingOps
+      .filter((o) => o.name.trim() && o.pricePerUnit)
+      .map((o) => ({ id: o.id, name: o.name, pricePerUnit: o.pricePerUnit.replace(",", ".") }));
 
     await fetch(`/api/orders/${order.id}`, {
       method: "PATCH",
@@ -182,32 +421,26 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
         name,
         description: description || null,
         fabricReceived: parseInt(fabricReceived) || 0,
+        pricePerPiece: pricePerPiece ? pricePerPiece.replace(",", ".") : null,
         receivedAt: receivedAt || null,
         deadline: deadline || null,
         supplier: supplier || null,
         notes: notes || null,
-        operations: validOps,
+        operations: validNew,
+        updatedOperations: validUpdated,
+        deletedOperationIds: deletedOpIds,
       }),
     });
 
     setLoading(false);
     onSaved();
-    onBack();
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2">← Назад</button>
-          <h2 className="text-[#2e2318] font-semibold truncate">{order.name}</h2>
-        </div>
-        <button
-          onClick={onDeleteRequest}
-          className="text-[#c0392b] hover:text-[#c0392b] text-sm border border-[#c0392b]/30 rounded-xl px-4 py-2"
-        >
-          Удалить
-        </button>
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2">← Назад</button>
+        <h2 className="text-[#2e2318] font-semibold truncate">Редактирование</h2>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -238,7 +471,7 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
         </div>
 
         <div>
-          <label className="text-[#6b5a45] text-sm mb-1.5 block">Кол-во материала (м)</label>
+          <label className="text-[#6b5a45] text-sm mb-1.5 block">Кол-во материала (шт)</label>
           <input
             type="number"
             value={fabricReceived}
@@ -246,6 +479,26 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
             placeholder="0"
             className="w-full bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
           />
+        </div>
+
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="text-[#6b5a45] text-sm mb-1.5 block">Цена за штуку (₽)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={pricePerPiece}
+              onChange={(e) => setPricePerPiece(e.target.value)}
+              placeholder="0"
+              className="w-full bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-[#6b5a45] text-sm mb-1.5 block">Цена за весь заказ</label>
+            <div className="w-full bg-[#ede9e1] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base">
+              {orderTotal > 0 ? `${fmtMoney(orderTotal)} ₽` : "—"}
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -280,25 +533,17 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
           />
         </div>
 
-        {/* Существующие операции */}
-        {order.orderOperations.length > 0 && (
-          <div>
-            <label className="text-[#6b5a45] text-sm mb-3 block">Текущие операции</label>
-            <div className="flex flex-col gap-1">
-              {order.orderOperations.map((op) => (
-                <div key={op.id} className="flex justify-between items-center bg-[#e8e3d9] rounded-xl px-4 py-3">
-                  <p className="text-[#2e2318] text-base">{op.name}</p>
-                  <p className="text-[#6b5a45] text-sm">{op.pricePerUnit} ₽/шт</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Добавить новые операции */}
+        {/* Операции — редактирование, удаление, добавление */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <label className="text-[#6b5a45] text-sm">Добавить операции</label>
+            <div className="flex items-baseline gap-2">
+              <label className="text-[#6b5a45] text-sm">Операции</label>
+              {pricePerPieceNum > 0 && (
+                <span className={`text-sm ${opsOverBudget ? "text-[#c0392b] font-medium" : "text-[#a0907a]"}`}>
+                  {fmtMoney(opsSum)} / {fmtMoney(pricePerPieceNum)} ₽
+                </span>
+              )}
+            </div>
             <button
               onClick={addNewOp}
               className="text-sm text-[#6b5a45] hover:text-[#2e2318] border border-[#d4cdc0] rounded-md px-3 py-1.5"
@@ -306,10 +551,38 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
               + добавить
             </button>
           </div>
-          {newOps.length > 0 && (
+
+          {existingOps.length === 0 && newOps.length === 0 ? (
+            <p className="text-[#a0907a] text-base">Нет операций. Нажмите «+ добавить».</p>
+          ) : (
             <div className="flex flex-col gap-3">
+              {existingOps.map((op, i) => (
+                <div key={`e-${op.id}`} className="flex gap-3 items-center">
+                  <input
+                    value={op.name}
+                    onChange={(e) => updateExistingOp(i, "name", e.target.value)}
+                    placeholder="Операция"
+                    className="flex-1 bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
+                  />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={op.pricePerUnit}
+                    onChange={(e) => updateExistingOp(i, "pricePerUnit", e.target.value)}
+                    placeholder="₽/шт"
+                    className={`w-20 bg-[#e8e3d9] border rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none ${opsOverBudget ? "border-[#c0392b] focus:border-[#c0392b]" : "border-[#d4cdc0] focus:border-[#a08060]"}`}
+                  />
+                  <button
+                    onClick={() => requestRemoveExisting(i)}
+                    aria-label="Удалить операцию"
+                    className="text-[#a0907a] hover:text-[#c0392b] text-xl leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
               {newOps.map((op, i) => (
-                <div key={i} className="flex gap-3 items-center">
+                <div key={`n-${i}`} className="flex gap-3 items-center">
                   <input
                     value={op.name}
                     onChange={(e) => updateNewOp(i, "name", e.target.value)}
@@ -317,14 +590,16 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
                     className="flex-1 bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
                   />
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     value={op.pricePerUnit}
                     onChange={(e) => updateNewOp(i, "pricePerUnit", e.target.value)}
                     placeholder="₽/шт"
-                    className="w-20 bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
+                    className={`w-20 bg-[#e8e3d9] border rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none ${opsOverBudget ? "border-[#c0392b] focus:border-[#c0392b]" : "border-[#d4cdc0] focus:border-[#a08060]"}`}
                   />
                   <button
                     onClick={() => removeNewOp(i)}
+                    aria-label="Удалить операцию"
                     className="text-[#a0907a] hover:text-[#c0392b] text-xl leading-none"
                   >
                     ×
@@ -333,16 +608,55 @@ function OrderEditView({ order, onBack, onSaved, onDeleteRequest }: EditProps) {
               ))}
             </div>
           )}
+
+          {opsOverBudget && (
+            <p className="text-[#c0392b] text-sm mt-3">
+              Сумма стоимостей операций ({fmtMoney(opsSum)} ₽) превышает цену за штуку ({fmtMoney(pricePerPieceNum)} ₽). Уменьшите стоимости операций или повысьте цену за штуку.
+            </p>
+          )}
         </div>
       </div>
 
       <button
         onClick={handleSave}
-        disabled={loading || !name.trim()}
+        disabled={loading || !name.trim() || opsOverBudget}
         className="w-full bg-[#7a5c2e] text-white rounded-xl py-4 text-base font-medium hover:bg-[#5c4420] transition disabled:opacity-50"
       >
         {loading ? "Сохранение..." : "Сохранить"}
       </button>
+
+      {pendingDeleteIdx !== null && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-5">
+          <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl p-8 w-full max-w-sm">
+            <p className="text-[#2e2318] font-semibold mb-3">Удалить операцию?</p>
+            <p className="text-[#6b5a45] text-base mb-2">
+              По операции «{existingOps[pendingDeleteIdx].name}» есть{" "}
+              <span className="text-[#c0392b] font-medium">
+                {existingOps[pendingDeleteIdx].workCount}{" "}
+                {recordsWord(existingOps[pendingDeleteIdx].workCount)}
+              </span>{" "}
+              выработки.
+            </p>
+            <p className="text-[#6b5a45] text-base mb-8">
+              После сохранения они будут удалены вместе с операцией без возможности восстановления. Заработок швей по ней исчезнет из сводок.
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setPendingDeleteIdx(null)}
+                className="flex-1 bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl py-3.5 text-base"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={() => removeExistingOp(pendingDeleteIdx)}
+                className="flex-1 bg-[#c0392b]/10 hover:bg-[#c0392b]/20 border border-[#c0392b]/40 text-[#c0392b] rounded-xl py-3.5 text-base"
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -358,12 +672,20 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [fabricReceived, setFabricReceived] = useState("");
+  const [pricePerPiece, setPricePerPiece] = useState("");
   const [receivedAt, setReceivedAt] = useState("");
   const [deadline, setDeadline] = useState("");
   const [supplier, setSupplier] = useState("");
   const [notes, setNotes] = useState("");
   const [operations, setOperations] = useState([{ name: "", pricePerUnit: "" }]);
   const [loading, setLoading] = useState(false);
+
+  const orderTotal = totalPrice(parseInt(fabricReceived) || 0, pricePerPiece);
+
+  // Умная сверка: сумма стоимостей операций не должна превышать цену за штуку
+  const opsSum = operations.reduce((s, o) => s + (parsePrice(o.pricePerUnit) || 0), 0);
+  const pricePerPieceNum = parsePrice(pricePerPiece) || 0;
+  const opsOverBudget = pricePerPieceNum > 0 && opsSum > pricePerPieceNum;
 
   function addOperation() {
     setOperations([...operations, { name: "", pricePerUnit: "" }]);
@@ -380,9 +702,11 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
   }
 
   async function handleSubmit() {
-    if (!name.trim()) return;
+    if (!name.trim() || opsOverBudget) return;
     setLoading(true);
-    const validOps = operations.filter((o) => o.name.trim() && o.pricePerUnit);
+    const validOps = operations
+      .filter((o) => o.name.trim() && o.pricePerUnit)
+      .map((o) => ({ name: o.name, pricePerUnit: o.pricePerUnit.replace(",", ".") }));
 
     await fetch("/api/orders", {
       method: "POST",
@@ -391,6 +715,7 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
         name,
         description: description || null,
         fabricReceived: parseInt(fabricReceived) || 0,
+        pricePerPiece: pricePerPiece ? pricePerPiece.replace(",", ".") : null,
         receivedAt: receivedAt || null,
         deadline: deadline || null,
         supplier: supplier || null,
@@ -440,7 +765,7 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
           </div>
 
           <div>
-            <label className="text-[#6b5a45] text-sm mb-1.5 block">Кол-во материала (м)</label>
+            <label className="text-[#6b5a45] text-sm mb-1.5 block">Кол-во материала (шт)</label>
             <input
               type="number"
               value={fabricReceived}
@@ -448,6 +773,26 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
               placeholder="0"
               className="w-full bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
             />
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-[#6b5a45] text-sm mb-1.5 block">Цена за штуку (₽)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={pricePerPiece}
+                onChange={(e) => setPricePerPiece(e.target.value)}
+                placeholder="0"
+                className="w-full bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-[#6b5a45] text-sm mb-1.5 block">Цена за весь заказ</label>
+              <div className="w-full bg-[#ede9e1] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base">
+                {orderTotal > 0 ? `${fmtMoney(orderTotal)} ₽` : "—"}
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-3">
@@ -484,7 +829,14 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
 
           <div>
             <div className="flex items-center justify-between mb-3">
-              <label className="text-[#6b5a45] text-sm">Швейные операции</label>
+              <div className="flex items-baseline gap-2">
+                <label className="text-[#6b5a45] text-sm">Швейные операции</label>
+                {pricePerPieceNum > 0 && (
+                  <span className={`text-sm ${opsOverBudget ? "text-[#c0392b] font-medium" : "text-[#a0907a]"}`}>
+                    {fmtMoney(opsSum)} / {fmtMoney(pricePerPieceNum)} ₽
+                  </span>
+                )}
+              </div>
               <button
                 onClick={addOperation}
                 className="text-sm text-[#6b5a45] hover:text-[#2e2318] border border-[#d4cdc0] rounded-md px-3 py-1.5"
@@ -502,11 +854,12 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
                     className="flex-1 bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
                   />
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     value={op.pricePerUnit}
                     onChange={(e) => updateOperation(i, "pricePerUnit", e.target.value)}
                     placeholder="₽/шт"
-                    className="w-20 bg-[#e8e3d9] border border-[#d4cdc0] rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none focus:border-[#a08060]"
+                    className={`w-20 bg-[#e8e3d9] border rounded-xl px-4 py-3.5 text-[#2e2318] text-base placeholder-[#a0907a] focus:outline-none ${opsOverBudget ? "border-[#c0392b] focus:border-[#c0392b]" : "border-[#d4cdc0] focus:border-[#a08060]"}`}
                   />
                   {operations.length > 1 && (
                     <button
@@ -519,13 +872,18 @@ function CreateOrderModal({ onClose, onCreated }: CreateProps) {
                 </div>
               ))}
             </div>
+            {opsOverBudget && (
+              <p className="text-[#c0392b] text-sm mt-3">
+                Сумма стоимостей операций ({fmtMoney(opsSum)} ₽) превышает цену за штуку ({fmtMoney(pricePerPieceNum)} ₽). Уменьшите стоимости операций или повысьте цену за штуку.
+              </p>
+            )}
           </div>
         </div>
 
         <div className="px-5 py-5 border-t border-[#d4cdc0]">
           <button
             onClick={handleSubmit}
-            disabled={loading || !name.trim()}
+            disabled={loading || !name.trim() || opsOverBudget}
             className="w-full bg-[#7a5c2e] text-white rounded-xl py-4 text-base font-medium hover:bg-[#5c4420] transition disabled:opacity-50"
           >
             {loading ? "Сохранение..." : "Создать заказ"}

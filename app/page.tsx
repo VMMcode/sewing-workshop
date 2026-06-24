@@ -3,8 +3,10 @@
 import { useState, useCallback } from "react";
 import SalaryTab from "@/components/SalaryTab";
 import OrdersTab from "@/components/OrdersTab";
+import EmployeesTab from "@/components/EmployeesTab";
+import AnalyticsTab from "@/components/AnalyticsTab";
 
-type Tab = "orders" | "salary";
+type Tab = "orders" | "salary" | "employees" | "analytics";
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("salary");
@@ -25,6 +27,8 @@ export default function DashboardPage() {
           {[
             { id: "salary", label: "Оплата ЗП" },
             { id: "orders", label: "Заказы" },
+            { id: "employees", label: "Сотрудники" },
+            { id: "analytics", label: "Аналитика" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -44,6 +48,8 @@ export default function DashboardPage() {
       <main className="px-5 py-5">
         {activeTab === "salary" && <SalaryTab key={ordersKey} />}
         {activeTab === "orders" && <OrdersTab onOrdersChanged={refreshOrders} />}
+        {activeTab === "employees" && <EmployeesTab />}
+        {activeTab === "analytics" && <AnalyticsTab />}
       </main>
     </div>
   );

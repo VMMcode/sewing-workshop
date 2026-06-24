@@ -88,6 +88,12 @@ export default function OrderDetail({ order, onBack }: Props) {
     return sum + r.quantity * parseFloat(r.operation.pricePerUnit);
   }, 0);
 
+  // Записи дня, сгруппированные по швее (порядок появления сохраняется)
+  const recordsBySeamstress = records.reduce<Record<string, DailyWorkRecord[]>>((acc, r) => {
+    (acc[r.seamstressName] ??= []).push(r);
+    return acc;
+  }, {});
+
   return (
     <div className="flex flex-col gap-6">
       {/* Шапка */}
@@ -150,22 +156,41 @@ export default function OrderDetail({ order, onBack }: Props) {
         <p className="text-[#a0907a] text-base text-center py-8">Нет записей за этот день</p>
       ) : (
         <div className="flex flex-col gap-3">
-          {records.map((r) => {
-            const earned = r.quantity * parseFloat(r.operation.pricePerUnit);
+          {Object.entries(recordsBySeamstress).map(([name, recs]) => {
+            const seamstressTotal = recs.reduce(
+              (sum, r) => sum + r.quantity * parseFloat(r.operation.pricePerUnit),
+              0
+            );
             return (
-              <div key={r.id} className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-5 py-4 flex items-center justify-between gap-3">
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <p className="text-[#2e2318] text-base font-medium truncate">{r.seamstressName}</p>
-                  <p className="text-[#6b5a45] text-sm truncate">{r.operation.name} · {r.quantity} шт · {r.operation.pricePerUnit} ₽/шт</p>
+              <div key={name} className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-5 py-4 flex flex-col gap-3">
+                <p className="text-[#2e2318] text-base font-semibold truncate">{name}</p>
+
+                <div className="flex flex-col gap-2">
+                  {recs.map((r) => {
+                    const earned = r.quantity * parseFloat(r.operation.pricePerUnit);
+                    return (
+                      <div key={r.id} className="flex items-center justify-between gap-3">
+                        <p className="text-[#6b5a45] text-sm min-w-0 truncate">
+                          {r.operation.name} · {r.quantity} шт · {r.operation.pricePerUnit} ₽/шт
+                        </p>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <p className="text-[#2e2318] text-sm">{earned.toLocaleString("ru-RU")} ₽</p>
+                          <button
+                            onClick={() => deleteRecord(r.id)}
+                            aria-label="Удалить запись"
+                            className="text-[#a0907a] hover:text-[#c0392b] text-xl leading-none"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="flex items-center gap-4 shrink-0">
-                  <p className="text-[#2e2318] text-base font-semibold">{earned.toLocaleString("ru-RU")} ₽</p>
-                  <button
-                    onClick={() => deleteRecord(r.id)}
-                    className="text-[#a0907a] hover:text-[#c0392b] text-xl leading-none"
-                  >
-                    ×
-                  </button>
+
+                <div className="flex justify-between items-center border-t border-[#d4cdc0] pt-3">
+                  <p className="text-[#6b5a45] text-sm">Итого по швее</p>
+                  <p className="text-[#2e2318] text-base font-semibold">{seamstressTotal.toLocaleString("ru-RU")} ₽</p>
                 </div>
               </div>
             );
