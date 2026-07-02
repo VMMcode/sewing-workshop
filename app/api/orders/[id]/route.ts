@@ -47,6 +47,18 @@ export async function PATCH(
     return NextResponse.json({ ok: true });
   }
 
+  // Переключение статуса заказа (завершён / активен)
+  if (body.status !== undefined) {
+    const completing = body.status === "completed";
+    await db.update(orders)
+      .set({
+        status: completing ? "completed" : "active",
+        completedAt: completing ? (body.completedAt ?? null) : null,
+      })
+      .where(eq(orders.id, parseInt(id)));
+    return NextResponse.json({ ok: true });
+  }
+
   // Обновление полей заказа
   const { name, description, fabricReceived, pricePerPiece, receivedAt, deadline, supplier, notes } = body;
   await db.update(orders).set({

@@ -20,7 +20,8 @@ export default function SalaryTab() {
 
   async function fetchOrders() {
     setLoading(true);
-    const res = await fetch("/api/orders");
+    // Завершённые заказы в оплату ЗП не подтягиваем — по ним оплата уже не вносится
+    const res = await fetch("/api/orders?status=active");
     const data = await res.json();
     setOrders(data);
     setLoading(false);

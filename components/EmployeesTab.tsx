@@ -378,13 +378,17 @@ type Analytics = {
     lastDate: string | null;
   };
   byOperation: { name: string; pieces: number; earned: number }[];
-  byOrder: {
-    orderId: number;
-    orderName: string;
-    pieces: number;
-    earned: number;
-    operations: { name: string; pieces: number; earned: number }[];
-  }[];
+  byOrder: OrderAnalytics[];
+};
+
+type OrderAnalytics = {
+  orderId: number;
+  orderName: string;
+  completed: boolean;
+  completedAt: string | null;
+  pieces: number;
+  earned: number;
+  operations: { name: string; pieces: number; earned: number }[];
 };
 
 function fmtMoney(n: number) {
@@ -394,6 +398,16 @@ function fmtMoney(n: number) {
 function EmployeeDetail({ employee, onBack }: { employee: Employee; onBack: () => void }) {
   const [data, setData] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  function toggle(orderId: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -448,33 +462,67 @@ function EmployeeDetail({ employee, onBack }: { employee: Employee; onBack: () =
             </p>
           )}
 
-          <div>
-            <p className="text-[#6b5a45] text-sm mb-3">По заказам ({data.totals.ordersCount})</p>
-            <div className="flex flex-col gap-2">
-              {data.byOrder.map((o) => (
-                <div key={o.orderId} className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-xl px-4 py-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[#2e2318] text-base font-semibold min-w-0 truncate">{o.orderName}</p>
-                    <div className="flex items-center gap-4 shrink-0">
-                      <span className="text-[#a0907a] text-sm">{o.pieces} оп.</span>
-                      <span className="text-[#2e2318] text-base font-semibold">{fmtMoney(o.earned)} ₽</span>
+          {(() => {
+            const activeOrders = data.byOrder.filter((o) => !o.completed);
+            const completedOrders = data.byOrder.filter((o) => o.completed);
+            return (
+              <>
+                <div>
+                  <p className="text-[#6b5a45] text-sm mb-3">По заказам ({activeOrders.length})</p>
+                  {activeOrders.length === 0 ? (
+                    <p className="text-[#a0907a] text-base">Нет активных заказов</p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {activeOrders.map((o) => (
+                        <div key={o.orderId} className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-xl px-4 py-3 flex flex-col gap-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-[#2e2318] text-base font-semibold min-w-0 truncate">{o.orderName}</p>
+                            <div className="flex items-center gap-4 shrink-0">
+                              <span className="text-[#a0907a] text-sm">{o.pieces} оп.</span>
+                              <span className="text-[#2e2318] text-base font-semibold">{fmtMoney(o.earned)} ₽</span>
+                            </div>
+                          </div>
+                          <OrderOperationsRows operations={o.operations} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {completedOrders.length > 0 && (
+                  <div>
+                    <p className="text-[#6b5a45] text-sm mb-3">Завершённые заказы ({completedOrders.length})</p>
+                    <div className="flex flex-col gap-2">
+                      {completedOrders.map((o) => {
+                        const open = expanded.has(o.orderId);
+                        return (
+                          <div key={o.orderId} className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-xl overflow-hidden">
+                            <button
+                              onClick={() => toggle(o.orderId)}
+                              className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-[#e8e3d9] transition"
+                            >
+                              <p className="text-[#2e2318] text-base font-semibold min-w-0 truncate">
+                                {open ? "▾" : "▸"} {o.orderName}
+                              </p>
+                              <div className="flex items-center gap-4 shrink-0">
+                                <span className="text-[#a0907a] text-sm">{o.pieces} оп.</span>
+                                <span className="text-[#2e2318] text-base font-semibold">{fmtMoney(o.earned)} ₽</span>
+                              </div>
+                            </button>
+                            {open && (
+                              <div className="px-4 pb-3">
+                                <OrderOperationsRows operations={o.operations} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1 border-t border-[#d4cdc0] pt-2">
-                    {o.operations.map((op) => (
-                      <div key={op.name} className="flex items-center justify-between gap-3">
-                        <p className="text-[#6b5a45] text-sm min-w-0 truncate">{op.name}</p>
-                        <div className="flex items-center gap-4 shrink-0">
-                          <span className="text-[#a0907a] text-sm">{op.pieces} шт</span>
-                          <span className="text-[#6b5a45] text-sm">{fmtMoney(op.earned)} ₽</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                )}
+              </>
+            );
+          })()}
 
           <div>
             <p className="text-[#6b5a45] text-sm mb-3">По операциям ({data.totals.operationsCount})</p>
@@ -492,6 +540,22 @@ function EmployeeDetail({ employee, onBack }: { employee: Employee; onBack: () =
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function OrderOperationsRows({ operations }: { operations: { name: string; pieces: number; earned: number }[] }) {
+  return (
+    <div className="flex flex-col gap-1 border-t border-[#d4cdc0] pt-2">
+      {operations.map((op) => (
+        <div key={op.name} className="flex items-center justify-between gap-3">
+          <p className="text-[#6b5a45] text-sm min-w-0 truncate">{op.name}</p>
+          <div className="flex items-center gap-4 shrink-0">
+            <span className="text-[#a0907a] text-sm">{op.pieces} шт</span>
+            <span className="text-[#6b5a45] text-sm">{fmtMoney(op.earned)} ₽</span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

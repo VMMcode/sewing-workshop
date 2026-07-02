@@ -13,8 +13,14 @@ type Order = {
   deadline: string | null;
   supplier: string | null;
   notes: string | null;
+  status: string;
+  completedAt: string | null;
   orderOperations: Operation[];
 };
+
+function todayStr() {
+  return new Date().toISOString().split("T")[0];
+}
 
 // Приводим ввод к числу: поддерживаем и точку, и запятую (1,2 = 1 руб 20 коп)
 function parsePrice(value: string | null) {
@@ -45,13 +51,30 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [confirmCompleteId, setConfirmCompleteId] = useState<number | null>(null);
+  const [statusTab, setStatusTab] = useState<"active" | "completed">("active");
 
   async function fetchOrders() {
     setLoading(true);
-    const res = await fetch("/api/orders");
+    const res = await fetch(`/api/orders?status=${statusTab}`);
     const data = await res.json();
     setOrders(data);
     setLoading(false);
+  }
+
+  // Завершение заказа и возврат в активные
+  async function setOrderStatus(id: number, status: "completed" | "active") {
+    await fetch(`/api/orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        status === "completed" ? { status, completedAt: todayStr() } : { status }
+      ),
+    });
+    setConfirmCompleteId(null);
+    await refreshSelectedOrder(id);
+    fetchOrders();
+    onOrdersChanged();
   }
 
   async function refreshSelectedOrder(id: number) {
@@ -75,7 +98,7 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
 
   useEffect(() => {
     fetchOrders();
-  }, []);
+  }, [statusTab]);
 
   if (selectedOrder && isEditing) {
     return (
@@ -100,11 +123,19 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
           onBack={() => setSelectedOrder(null)}
           onEdit={() => setIsEditing(true)}
           onDeleteRequest={() => setConfirmDeleteId(selectedOrder.id)}
+          onCompleteRequest={() => setConfirmCompleteId(selectedOrder.id)}
+          onReopen={() => setOrderStatus(selectedOrder.id, "active")}
         />
         {confirmDeleteId !== null && (
           <ConfirmDeleteModal
             onCancel={() => setConfirmDeleteId(null)}
             onConfirm={() => deleteOrder(confirmDeleteId)}
+          />
+        )}
+        {confirmCompleteId !== null && (
+          <ConfirmCompleteModal
+            onCancel={() => setConfirmCompleteId(null)}
+            onConfirm={() => setOrderStatus(confirmCompleteId, "completed")}
           />
         )}
       </>
@@ -113,11 +144,28 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <p className="text-[#6b5a45] text-sm">Заказы</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex gap-2">
+          {([
+            { id: "active", label: "Активные" },
+            { id: "completed", label: "Завершённые" },
+          ] as const).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setStatusTab(t.id)}
+              className={`text-sm rounded-xl px-4 py-2 border transition ${
+                statusTab === t.id
+                  ? "bg-[#7a5c2e] text-white border-[#7a5c2e]"
+                  : "bg-[#e8e3d9] hover:bg-[#d4cdc0] border-[#d4cdc0] text-[#2e2318]"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2"
+          className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2 shrink-0"
         >
           + Добавить
         </button>
@@ -126,7 +174,9 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
       {loading ? (
         <p className="text-[#a0907a] text-base text-center py-8">Загрузка...</p>
       ) : orders.length === 0 ? (
-        <p className="text-[#a0907a] text-base text-center py-8">Нет заказов</p>
+        <p className="text-[#a0907a] text-base text-center py-8">
+          {statusTab === "completed" ? "Нет завершённых заказов" : "Нет активных заказов"}
+        </p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {orders.map((order) => (
@@ -135,7 +185,14 @@ export default function OrdersTab({ onOrdersChanged }: Props) {
               onClick={() => openOrder(order)}
               className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-5 py-4 flex flex-col gap-2 text-left w-full hover:border-[#a08060] transition"
             >
-              <p className="text-[#2e2318] text-base font-semibold">{order.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-[#2e2318] text-base font-semibold min-w-0 truncate">{order.name}</p>
+                {order.status === "completed" && (
+                  <span className="text-[#7a5c2e] text-sm bg-[#7a5c2e]/10 border border-[#7a5c2e]/30 rounded-md px-2 py-0.5 shrink-0">
+                    завершён{order.completedAt ? ` ${fmtDate(order.completedAt)}` : ""}
+                  </span>
+                )}
+              </div>
               {order.description && (
                 <p className="text-[#6b5a45] text-sm line-clamp-2">{order.description}</p>
               )}
@@ -224,6 +281,33 @@ function ConfirmDeleteModal({ onCancel, onConfirm }: { onCancel: () => void; onC
   );
 }
 
+// --- Модалка подтверждения завершения ---
+
+function ConfirmCompleteModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-5">
+      <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl p-8 w-full max-w-sm">
+        <p className="text-[#2e2318] font-semibold mb-3">Завершить заказ?</p>
+        <p className="text-[#6b5a45] text-base mb-8">Заказ уйдёт из активных и из «Оплаты ЗП». Все данные сохранятся, вернуть в активные можно в любой момент.</p>
+        <div className="flex gap-4">
+          <button
+            onClick={onCancel}
+            className="flex-1 bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl py-3.5 text-base"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 bg-[#7a5c2e]/10 hover:bg-[#7a5c2e]/20 border border-[#7a5c2e]/40 text-[#7a5c2e] rounded-xl py-3.5 text-base"
+          >
+            Завершить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Просмотр информации о заказе (только чтение) ---
 
 function fmtDate(d: string) {
@@ -235,14 +319,32 @@ type InfoProps = {
   onBack: () => void;
   onEdit: () => void;
   onDeleteRequest: () => void;
+  onCompleteRequest: () => void;
+  onReopen: () => void;
 };
 
-function OrderInfoView({ order, onBack, onEdit, onDeleteRequest }: InfoProps) {
+function OrderInfoView({ order, onBack, onEdit, onDeleteRequest, onCompleteRequest, onReopen }: InfoProps) {
+  const isCompleted = order.status === "completed";
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
         <button onClick={onBack} className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2">← Назад</button>
         <div className="flex items-center gap-2">
+          {isCompleted ? (
+            <button
+              onClick={onReopen}
+              className="text-sm border border-[#d4cdc0] text-[#6b5a45] hover:border-[#a08060] hover:text-[#2e2318] rounded-xl px-4 py-2.5 transition"
+            >
+              Вернуть в активные
+            </button>
+          ) : (
+            <button
+              onClick={onCompleteRequest}
+              className="text-sm border border-[#7a5c2e]/40 text-[#7a5c2e] hover:bg-[#7a5c2e]/10 rounded-xl px-4 py-2.5 transition"
+            >
+              ✓ Завершить
+            </button>
+          )}
           <button
             onClick={onEdit}
             aria-label="Редактировать"
@@ -261,7 +363,14 @@ function OrderInfoView({ order, onBack, onEdit, onDeleteRequest }: InfoProps) {
       </div>
 
       <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-5 py-5 flex flex-col gap-4">
-        <h2 className="text-[#2e2318] text-lg font-semibold">{order.name}</h2>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-[#2e2318] text-lg font-semibold">{order.name}</h2>
+          {isCompleted && (
+            <span className="text-[#7a5c2e] text-sm bg-[#7a5c2e]/10 border border-[#7a5c2e]/30 rounded-md px-2 py-0.5">
+              завершён{order.completedAt ? ` ${fmtDate(order.completedAt)}` : ""}
+            </span>
+          )}
+        </div>
         {order.description && <p className="text-[#6b5a45] text-base">{order.description}</p>}
 
         <div className="grid grid-cols-2 gap-4">

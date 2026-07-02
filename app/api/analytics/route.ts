@@ -16,18 +16,25 @@ export async function GET(req: NextRequest) {
   });
 
   // --- Рентабельность заказов (за всё время) ---
-  const profit = new Map<number, { orderId: number; orderName: string; revenue: number | null; payout: number }>();
+  const profit = new Map<number, { orderId: number; orderName: string; revenue: number | null; payout: number; itemCount: number; completed: boolean; completedAt: string | null; opTotals: Map<number, number> }>();
   for (const r of all) {
     const earned = r.quantity * parseFloat(r.operation.pricePerUnit);
     const price = r.order?.pricePerPiece ? parseFloat(r.order.pricePerPiece) : 0;
-    const revenue = price ? price * (r.order?.fabricReceived ?? 0) : null;
+    const itemCount = r.order?.fabricReceived ?? 0;
+    const revenue = price ? price * itemCount : null;
     const p = profit.get(r.orderId) ?? {
       orderId: r.orderId,
       orderName: r.order?.name ?? "—",
       revenue,
       payout: 0,
+      itemCount,
+      completed: r.order?.status === "completed",
+      completedAt: r.order?.completedAt ?? null,
+      opTotals: new Map<number, number>(),
     };
     p.payout += earned;
+    // Сумма выработки по каждой операции — чтобы выявить перерасход
+    p.opTotals.set(r.operationId, (p.opTotals.get(r.operationId) ?? 0) + r.quantity);
     profit.set(r.orderId, p);
   }
   const byOrderProfit = [...profit.values()]
@@ -38,6 +45,10 @@ export async function GET(req: NextRequest) {
       payout: p.payout,
       margin: p.revenue != null ? p.revenue - p.payout : null,
       marginPct: p.revenue ? (p.revenue - p.payout) / p.revenue : null,
+      completed: p.completed,
+      completedAt: p.completedAt,
+      // Перерасход: по какой-либо операции сделано больше, чем изделий в заказе
+      hasOverage: p.itemCount > 0 && [...p.opTotals.values()].some((t) => t > p.itemCount),
     }))
     .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0));
 

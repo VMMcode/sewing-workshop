@@ -29,7 +29,7 @@ export async function GET(
   let lastDate: string | null = null;
 
   type OpAgg = { name: string; pieces: number; earned: number };
-  const byOrder = new Map<number, { orderId: number; orderName: string; pieces: number; earned: number; ops: Map<string, OpAgg> }>();
+  const byOrder = new Map<number, { orderId: number; orderName: string; completed: boolean; completedAt: string | null; pieces: number; earned: number; ops: Map<string, OpAgg> }>();
   const byOperation = new Map<string, OpAgg>();
 
   for (const r of records) {
@@ -44,6 +44,8 @@ export async function GET(
     const o = byOrder.get(r.orderId) ?? {
       orderId: r.orderId,
       orderName: r.order?.name ?? "—",
+      completed: r.order?.status === "completed",
+      completedAt: r.order?.completedAt ?? null,
       pieces: 0,
       earned: 0,
       ops: new Map<string, OpAgg>(),
@@ -78,6 +80,8 @@ export async function GET(
       .map((o) => ({
         orderId: o.orderId,
         orderName: o.orderName,
+        completed: o.completed,
+        completedAt: o.completedAt,
         pieces: o.pieces,
         earned: o.earned,
         operations: [...o.ops.values()].sort((a, b) => b.earned - a.earned),

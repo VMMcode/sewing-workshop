@@ -12,6 +12,7 @@ export const orders = pgTable("orders", {
   supplier: text("supplier"),
   notes: text("notes"),
   status: text("status").notNull().default("active"),
+  completedAt: date("completed_at"),
   archived: integer("archived").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });

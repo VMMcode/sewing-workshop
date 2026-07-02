@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orders, orderOperations } from "@/lib/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const status = searchParams.get("status"); // active | completed | all (по умолчанию — все)
+
+  const conditions = [eq(orders.archived, 0)];
+  if (status === "active" || status === "completed") {
+    conditions.push(eq(orders.status, status));
+  }
+
   const result = await db.query.orders.findMany({
-    where: eq(orders.archived, 0),
+    where: and(...conditions),
     orderBy: desc(orders.createdAt),
     with: {
       orderOperations: true,

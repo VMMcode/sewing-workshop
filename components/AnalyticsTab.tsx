@@ -12,6 +12,9 @@ type ProfitRow = {
   payout: number;
   margin: number | null;
   marginPct: number | null;
+  hasOverage: boolean;
+  completed: boolean;
+  completedAt: string | null;
 };
 
 type Data = {
@@ -31,6 +34,7 @@ export default function AnalyticsTab() {
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedOrder, setSelectedOrder] = useState<{ orderId: number; orderName: string } | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -59,6 +63,16 @@ export default function AnalyticsTab() {
     ? data.byOrderProfit.reduce((s, o) => s + (lossOf(o) ?? 0), 0)
     : 0;
 
+  if (selectedOrder) {
+    return (
+      <OrderOperationsDetail
+        orderId={selectedOrder.orderId}
+        orderName={selectedOrder.orderName}
+        onBack={() => setSelectedOrder(null)}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Выручка и выплаты по заказам — за всё время */}
@@ -83,9 +97,21 @@ export default function AnalyticsTab() {
               {data.byOrderProfit.map((o) => {
                 const loss = lossOf(o);
                 return (
-                  <div key={o.orderId} className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-xl px-4 py-3 flex flex-col gap-1">
+                  <button
+                    key={o.orderId}
+                    onClick={() => setSelectedOrder({ orderId: o.orderId, orderName: o.orderName })}
+                    className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-xl px-4 py-3 flex flex-col gap-1 text-left w-full hover:border-[#a08060] transition"
+                  >
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-[#2e2318] text-base font-semibold min-w-0 truncate">{o.orderName}</p>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p className="text-[#2e2318] text-base font-semibold min-w-0 truncate">{o.orderName}</p>
+                        {o.completed && (
+                          <span className="text-[#7a5c2e] text-sm bg-[#7a5c2e]/10 border border-[#7a5c2e]/30 rounded-md px-2 py-0.5 shrink-0">завершён</span>
+                        )}
+                        {o.hasOverage && (
+                          <span className="text-[#c0392b] text-sm bg-[#c0392b]/10 border border-[#c0392b]/30 rounded-md px-2 py-0.5 shrink-0">превышение</span>
+                        )}
+                      </div>
                       {loss == null ? (
                         <span className="text-[#a0907a] text-sm shrink-0">цена не задана</span>
                       ) : loss > 0 ? (
@@ -94,11 +120,14 @@ export default function AnalyticsTab() {
                         <span className="text-[#a0907a] text-sm shrink-0">убытка нет</span>
                       )}
                     </div>
-                    <div className="flex flex-wrap gap-x-4 text-sm text-[#a0907a]">
-                      <span>Выручка: {o.revenue != null ? `${fmtMoney(o.revenue)} ₽` : "—"}</span>
-                      <span>К выплате: {fmtMoney(o.payout)} ₽</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap gap-x-4 text-sm text-[#a0907a]">
+                        <span>Выручка: {o.revenue != null ? `${fmtMoney(o.revenue)} ₽` : "—"}</span>
+                        <span>К выплате: {fmtMoney(o.payout)} ₽</span>
+                      </div>
+                      <span className="text-[#a0907a] text-xl shrink-0">›</span>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -212,6 +241,126 @@ function StatCard({ label, value, accent }: { label: string; value: string; acce
     <div className="bg-[#f5f2ec] border border-[#d4cdc0] rounded-2xl px-4 py-4">
       <p className="text-[#a0907a] text-sm mb-1">{label}</p>
       <p className={`text-lg font-semibold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+// --- Детальная аналитика по операциям заказа ---
+
+type OpSeamstress = { name: string; quantity: number };
+type OpAnalytics = {
+  operationId: number;
+  name: string;
+  pricePerUnit: string;
+  total: number;
+  overage: number;
+  isOver: boolean;
+  bySeamstress: OpSeamstress[];
+};
+type OrderOpsData = {
+  orderId: number;
+  orderName: string;
+  itemCount: number;
+  completed: boolean;
+  completedAt: string | null;
+  hasOverage: boolean;
+  operations: OpAnalytics[];
+};
+
+function fmtDate(d: string) {
+  return new Date(d + "T00:00:00").toLocaleDateString("ru-RU");
+}
+
+function OrderOperationsDetail({
+  orderId,
+  orderName,
+  onBack,
+}: {
+  orderId: number;
+  orderName: string;
+  onBack: () => void;
+}) {
+  const [data, setData] = useState<OrderOpsData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/orders/${orderId}/operations-analytics`)
+      .then((r) => r.json())
+      .then((d) => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [orderId]);
+
+  const overOps = data ? data.operations.filter((o) => o.isOver) : [];
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="text-sm bg-[#e8e3d9] hover:bg-[#d4cdc0] border border-[#d4cdc0] text-[#2e2318] rounded-xl px-4 py-2">← Назад</button>
+        <h2 className="text-[#2e2318] font-semibold truncate">{orderName}</h2>
+        {data?.completed && (
+          <span className="text-[#7a5c2e] text-sm bg-[#7a5c2e]/10 border border-[#7a5c2e]/30 rounded-md px-2 py-0.5 shrink-0">
+            завершён{data.completedAt ? ` ${fmtDate(data.completedAt)}` : ""}
+          </span>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="text-[#a0907a] text-base text-center py-8">Загрузка...</p>
+      ) : !data ? (
+        <p className="text-[#a0907a] text-base text-center py-8">Не удалось загрузить данные</p>
+      ) : (
+        <>
+          {data.hasOverage && (
+            <div className="bg-[#c0392b]/10 border border-[#c0392b]/40 rounded-2xl px-5 py-4">
+              <p className="text-[#c0392b] text-base font-semibold mb-1">Превышение операций</p>
+              <p className="text-[#6b5a45] text-sm">
+                По {overOps.length === 1 ? "операции" : "операциям"}{" "}
+                {overOps.map((o) => `«${o.name}»`).join(", ")}{" "}
+                сделано больше, чем изделий в заказе — возможно, кто-то из швей завысил подсчёт.
+              </p>
+            </div>
+          )}
+
+          <p className="text-[#6b5a45] text-sm">
+            Изделий в заказе: <span className="text-[#2e2318] font-semibold">{data.itemCount || "—"}</span>
+          </p>
+
+          {data.operations.length === 0 ? (
+            <p className="text-[#a0907a] text-base text-center py-8">Нет операций по заказу</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {data.operations.map((op) => (
+                <div
+                  key={op.operationId}
+                  className={`bg-[#f5f2ec] border rounded-2xl px-4 py-4 flex flex-col gap-3 ${op.isOver ? "border-[#c0392b]/50" : "border-[#d4cdc0]"}`}
+                >
+                  <div>
+                    <p className={`text-base font-semibold truncate ${op.isOver ? "text-[#c0392b]" : "text-[#2e2318]"}`}>{op.name}</p>
+                    <p className={`text-sm ${op.isOver ? "text-[#c0392b]" : "text-[#a0907a]"}`}>
+                      {op.total} из {data.itemCount || "—"}
+                      {op.isOver && ` (+${op.overage})`}
+                    </p>
+                  </div>
+                  {op.bySeamstress.length === 0 ? (
+                    <p className="text-[#a0907a] text-sm">Нет выработки</p>
+                  ) : (
+                    <div className="flex flex-col gap-1 border-t border-[#d4cdc0] pt-2">
+                      {op.bySeamstress.map((s) => (
+                        <div key={s.name} className="flex items-center justify-between gap-3">
+                          <span className="text-[#6b5a45] text-sm min-w-0 truncate">{s.name}</span>
+                          <span className="text-[#2e2318] text-sm shrink-0">{s.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
